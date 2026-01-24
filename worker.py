@@ -488,9 +488,7 @@ def check_for_keyword_replies(keyword="ofc"):
                             "Attached is your personalized guide as requested.", 
                             pdf_bytes
                         )
-                        if success:
-                            # Mark as 'responded' in your DB
-                            supabase.table("responded_leads").upsert({"email": from_email, "responded_at": datetime.now(timezone.utc).isoformat()}).execute()
+                  
                             
         except Exception as e:
             print(f"Error checking {acc['email']}: {e}")
