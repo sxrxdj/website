@@ -497,24 +497,20 @@ def check_for_keyword_replies(keyword="ofc"):
 
 
 
-import imaplib
-import email
-import pdfkit
 import shutil
+import pdfkit
 import urllib.parse
 from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
-from datetime import datetime, timezone
 
-# Path setup for GitHub/cPanel
+# Setup path for GitHub (shutil.which) or cPanel fallback
 WKHTML_PATH = shutil.which("wkhtmltopdf") or '/home/your_user/bin/wkhtmltopdf'
 pdf_config = pdfkit.configuration(wkhtmltopdf=WKHTML_PATH)
 
 def check_and_reply_with_pdf(keyword="ofc"):
     print(f"DEBUG: Starting reply check for keyword: {keyword}")
     
-    # 1. Get your accounts
+    # 1. Fetch SMTP accounts
     accounts = supabase.table("smtp_accounts").select("*").execute().data
     
     for acc in accounts:
@@ -524,13 +520,14 @@ def check_and_reply_with_pdf(keyword="ofc"):
             mail.login(acc["smtp_username"], password)
             mail.select("inbox")
             
+            # Search for UNSEEN messages
             _, data = mail.search(None, 'UNSEEN')
             for num in data[0].split():
                 _, msg_data = mail.fetch(num, '(RFC822)')
                 msg = email.message_from_bytes(msg_data[0][1])
                 from_email = email.utils.parseaddr(msg['From'])[1].lower()
                 
-                # Extract the body text
+                # Check body for keyword
                 body = ""
                 if msg.is_multipart():
                     for part in msg.walk():
@@ -540,41 +537,41 @@ def check_and_reply_with_pdf(keyword="ofc"):
                     body = msg.get_payload(decode=True).decode(errors='ignore')
 
                 if keyword.lower() in body.lower():
-                    print(f"Match! Found '{keyword}' from {from_email}")
-
-                    # --- CRITICAL FIX: FETCH THE LEAD ID ---
-                    lead_query = supabase.table("leads").select("id, name, last_name, email").eq("email", from_email).execute()
+                    # --- CRITICAL FIX FOR 23502 ERROR ---
+                    # 2. Fetch the lead to get the numeric ID
+                    lead_res = supabase.table("leads").select("*").eq("email", from_email).execute()
                     
-                    if not lead_query.data:
-                        print(f"Error: Email {from_email} found in inbox but not in Leads table.")
+                    if not lead_res.data:
+                        print(f"⚠️ Email {from_email} found but not in 'leads' table. Cannot link response.")
                         continue
                     
-                    lead_info = lead_query.data[0]
-                    lead_id = lead_info['id']  # This is the "original_lead_id"
-                    
-                    # --- GENERATE PERSONALIZED PDF ---
-                    full_name = f"{lead_info.get('name', '')} {lead_info.get('last_name', '')}".strip()
+                    lead_data = lead_res.data[0]
+                    lead_id = lead_data['id'] # This is the original_lead_id
+
+                    # 3. Generate Personalization
+                    full_name = f"{lead_data.get('name', '')} {lead_data.get('last_name', '')}".strip()
                     params = {
                         "user_id": lead_id,
                         "email": from_email,
                         "full_name": full_name
                     }
                     personalized_url = f"https://replyzeai.com/app/auto-register?{urllib.parse.urlencode(params)}"
-                    
+
+                    # 4. Create PDF from HTML
                     with open('7days.html', 'r', encoding='utf-8') as f:
                         html_content = f.read()
                     
-                    # Replace the link in your 7days.html
+                    # Targeting the specific link in your 7days.html
                     html_content = html_content.replace('https://replyzeai.vercel.app/temporary2', personalized_url)
                     
                     pdf_bytes = pdfkit.from_string(html_content, False, configuration=pdf_config)
 
-                    # --- SEND EMAIL ---
+                    # 5. Build and Send the Email
                     reply = MIMEMultipart()
                     reply["Subject"] = f"Re: {msg['Subject']}"
                     reply["From"] = f"{acc['display_name']} <{acc['email']}>"
                     reply["To"] = from_email
-                    reply.attach(MIMEText("Here is your personalized guide!", "plain"))
+                    reply.attach(MIMEText("Thanks for your interest! Your personalized guide is attached.", "plain"))
                     
                     part = MIMEApplication(pdf_bytes, Name="7daysys.pdf")
                     part['Content-Disposition'] = 'attachment; filename="7daysys.pdf"'
@@ -585,19 +582,18 @@ def check_and_reply_with_pdf(keyword="ofc"):
                         server.login(acc["smtp_username"], password)
                         server.send_message(reply)
 
-                    # --- LOG TO DATABASE (FIXED) ---
-                    # We pass 'original_lead_id' explicitly here
+                    # 6. Log the response (Passing the lead_id correctly)
                     supabase.table("responded_leads").insert({
                         "original_lead_id": lead_id,
                         "email": from_email,
                         "responded_at": datetime.now(timezone.utc).isoformat()
                     }).execute()
                     
-                    print(f"✅ PDF Sent and Database Updated for {from_email}")
+                    print(f"✅ Success for {from_email}")
 
             mail.logout()
         except Exception as e:
-            print(f"❌ Error in check_and_reply: {str(e)}")
+            print(f"❌ Error: {str(e)}")
             
             
             
