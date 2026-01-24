@@ -585,10 +585,7 @@ def check_and_reply_with_pdf(keyword="ofc"):
                     supabase.table("email_queue").delete().eq("lead_id", lead_id).execute()
                     
                     # 7. Record in responded_leads table with the required original_lead_id
-                    supabase.table("responded_leads").upsert({
-                        "original_lead_id": lead_id,  # ADD THIS - it's required
-                        "email": from_email, 
-                        "responded_at": datetime.now(timezone.utc).isoformat()
+                    
                     }).execute()
                     
                     print(f"✅ PDF Sent & Lead {from_email} marked as responded.")
