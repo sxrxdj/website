@@ -586,7 +586,7 @@ def check_and_reply_with_pdf(keyword="ofc"):
                     
                     # 7. Record in responded_leads table with the required original_lead_id
                     
-                    }).execute()
+                    
                     
                     print(f"✅ PDF Sent & Lead {from_email} marked as responded.")
 
