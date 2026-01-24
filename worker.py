@@ -507,40 +507,32 @@ from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
 from datetime import datetime, timezone
 
-# 1. Setup Path Logic (Works for cPanel and GitHub)
-# Replace 'your_cpanel_username' with your actual cPanel username
-CPANEL_BIN = '/home/wmgtezae/bin/wkhtmltopdf'
-WKHTML_PATH = shutil.which("wkhtmltopdf") or CPANEL_BIN
+# Path setup for GitHub/cPanel
+WKHTML_PATH = shutil.which("wkhtmltopdf") or '/home/your_user/bin/wkhtmltopdf'
 pdf_config = pdfkit.configuration(wkhtmltopdf=WKHTML_PATH)
 
 def check_and_reply_with_pdf(keyword="ofc"):
-    """
-    Scans all SMTP/IMAP accounts for unread replies containing the keyword,
-    generates a personalized PDF, and logs the response in Supabase.
-    """
-    print(f"DEBUG: Starting reply check for keyword: {keyword}")
+    print(f"DEBUG: Scanning for keyword: {keyword}")
     
-    # Get all active SMTP accounts from your DB
+    # 1. Get SMTP accounts
     accounts = supabase.table("smtp_accounts").select("*").execute().data
     
     for acc in accounts:
         try:
-            # Decrypt password and connect to IMAP
             password = aesgcm_decrypt(acc["encrypted_smtp_password"])
             mail = imaplib.IMAP4_SSL(acc["imap_host"])
             mail.login(acc["smtp_username"], password)
             mail.select("inbox")
             
-            # Search for unread (UNSEEN) messages
+            # Find unread messages
             _, data = mail.search(None, 'UNSEEN')
-            
             for num in data[0].split():
                 _, msg_data = mail.fetch(num, '(RFC822)')
-                raw_email = msg_data[0][1]
-                msg = email.message_from_bytes(raw_email)
+                msg = email.message_from_bytes(msg_data[0][1])
                 
-                # Get sender and body text
                 from_email = email.utils.parseaddr(msg['From'])[1].lower()
+                
+                # Extract body
                 body = ""
                 if msg.is_multipart():
                     for part in msg.walk():
@@ -549,22 +541,21 @@ def check_and_reply_with_pdf(keyword="ofc"):
                 else:
                     body = msg.get_payload(decode=True).decode(errors='ignore')
 
-                # Check if keyword is in the body
                 if keyword.lower() in body.lower():
-                    print(f"Found keyword '{keyword}' from {from_email}. Processing...")
+                    # --- THE FIX STARTS HERE ---
                     
-                    # 1. Fetch Lead data to get ID and personalization
+                    # 2. Get the lead from DB to find their actual ID
                     lead_res = supabase.table("leads").select("*").eq("email", from_email).execute()
                     
                     if not lead_res.data:
-                        print(f"Lead {from_email} not found in database. Skipping.")
+                        print(f"Skipping: {from_email} not found in leads table.")
                         continue
-                        
+                    
                     lead_data = lead_res.data[0]
-                    lead_id = lead_data['id']
+                    lead_id = lead_data['id'] # This is your original_lead_id
+                    
+                    # 3. Generate Personalization
                     full_name = f"{lead_data.get('name', '')} {lead_data.get('last_name', '')}".strip()
-
-                    # 2. Build personalized URL
                     params = {
                         "user_id": lead_id,
                         "email": from_email,
@@ -572,29 +563,21 @@ def check_and_reply_with_pdf(keyword="ofc"):
                     }
                     p_url = f"https://replyzeai.com/app/auto-register?{urllib.parse.urlencode(params)}"
 
-                    # 3. Generate PDF
+                    # 4. Generate PDF
                     with open('7days.html', 'r', encoding='utf-8') as f:
                         html_content = f.read()
                     
-                    # Replace the button link in your HTML
                     html_content = html_content.replace('https://replyzeai.vercel.app/temporary2', p_url)
                     
-                    pdf_options = {
-                        'page-size': 'A4',
-                        'encoding': "UTF-8",
-                        'enable-local-file-access': None,
-                        'quiet': ''
-                    }
-                    
-                    pdf_bytes = pdfkit.from_string(html_content, False, options=pdf_options, configuration=pdf_config)
+                    options = {'page-size': 'A4', 'encoding': "UTF-8", 'no-outline': None}
+                    pdf_bytes = pdfkit.from_string(html_content, False, options=options, configuration=pdf_config)
 
-                    # 4. Construct and Send Email
+                    # 5. Send the Email
                     reply = MIMEMultipart()
                     reply["Subject"] = f"Re: {msg['Subject']}"
                     reply["From"] = f"{acc['display_name']} <{acc['email']}>"
                     reply["To"] = from_email
-                    
-                    reply.attach(MIMEText("Here is your personalized 7-Day Lead Conversion System PDF as requested!", "plain"))
+                    reply.attach(MIMEText("Thanks for your interest! Your personalized guide is attached.", "plain"))
                     
                     part = MIMEApplication(pdf_bytes, Name="7daysys.pdf")
                     part['Content-Disposition'] = 'attachment; filename="7daysys.pdf"'
@@ -605,18 +588,18 @@ def check_and_reply_with_pdf(keyword="ofc"):
                         server.login(acc["smtp_username"], password)
                         server.send_message(reply)
 
-                    # 5. Log to responded_leads (FIXED: Includes original_lead_id)
+                    # 6. Log Response (Passing original_lead_id correctly)
                     supabase.table("responded_leads").insert({
-                        "original_lead_id": lead_id,
+                        "original_lead_id": lead_id, # This fixes the '23502' error
                         "email": from_email,
                         "responded_at": datetime.now(timezone.utc).isoformat()
                     }).execute()
                     
-                    print(f"✅ Successfully sent PDF and logged response for {from_email}")
+                    print(f"✅ Success: PDF sent and logged for {from_email}")
 
             mail.logout()
         except Exception as e:
-            print(f"❌ Error checking account {acc['email']}: {str(e)}")
+            print(f"❌ Error: {str(e)}")
             
             
             
