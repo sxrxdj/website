@@ -380,5 +380,170 @@ def replace_urls_with_tracking(html_content, lead_id, campaign_id, email_queue_i
     # Replace all URLs
     return re.sub(pattern, replace_with_tracking, html_content)
 
+    
+# Add these imports to worker.py
+import imaplib
+import email
+from email.mime.multipart import MIMEMultipart
+from email.mime.application import MIMEApplication
+import pdfkit
+
+# ... (Existing Supabase and Encryption code) ...
+
+def generate_pdf_buffer(lead_data):
+    """Generates the personalized PDF in memory"""
+    full_name = f"{lead_data.get('name', '')} {lead_data.get('last_name', '')}".strip()
+    
+    # Build the personalized URL params requested
+    params = {
+        "user_id": lead_data['id'],
+        "email": lead_data['email'],
+        "full_name": full_name
+    }
+    encoded_params = urllib.parse.urlencode(params)
+    personalized_url = f"https://replyzeai.com/app/auto-register?{encoded_params}"
+
+    # Load HTML and inject the URL
+    with open('7days.html', 'r', encoding='utf-8') as f:
+        html_content = f.read()
+    
+    # Replace the trial links in your 7days.html
+    html_content = html_content.replace('https://replyzeai.vercel.app/temporary2', personalized_url)
+
+    options = {
+        'page-size': 'A4',
+        'encoding': "UTF-8",
+        'no-outline': None,
+        'enable-local-file-access': None
+    }
+    
+    return pdfkit.from_string(html_content, False, options=options)
+
+def send_email_with_pdf(account, to_email, subject, body, pdf_content):
+    """Sends an email with the 7daysys.pdf attachment"""
+    try:
+        smtp_password = aesgcm_decrypt(account["encrypted_smtp_password"])
+        msg = MIMEMultipart()
+        msg["Subject"] = subject
+        msg["From"] = f"{account['display_name']} <{account['email']}>"
+        msg["To"] = to_email
+        
+        msg.attach(MIMEText(body, "html"))
+        
+        # Attach the PDF
+        part = MIMEApplication(pdf_content, Name="7daysys.pdf")
+        part['Content-Disposition'] = 'attachment; filename="7daysys.pdf"'
+        msg.attach(part)
+        
+        with smtplib.SMTP(account["smtp_host"], account["smtp_port"]) as server:
+            server.starttls()
+            server.login(account["smtp_username"], smtp_password)
+            server.send_message(msg)
+        return True
+    except Exception as e:
+        print(f"Failed to send PDF: {e}")
+        return False
+
+def check_for_keyword_replies(keyword="ofc"):
+    """Scans inboxes for the keyword and sends the PDF"""
+    accounts = supabase.table("smtp_accounts").select("*").execute().data
+    
+    for acc in accounts:
+        try:
+            # Connect to IMAP
+            mail = imaplib.IMAP4_SSL(acc["imap_host"], acc.get("imap_port", 993))
+            mail.login(acc["smtp_username"], aesgcm_decrypt(acc["encrypted_smtp_password"]))
+            mail.select("inbox")
+            
+            # Search for unseen messages
+            _, data = mail.search(None, 'UNSEEN')
+            for num in data[0].split():
+                _, msg_data = mail.fetch(num, '(RFC822)')
+                raw_email = msg_data[0][1]
+                msg = email.message_from_bytes(raw_email)
+                
+                # Get sender and body
+                from_email = email.utils.parseaddr(msg['From'])[1].lower()
+                body = ""
+                if msg.is_multipart():
+                    for part in msg.walk():
+                        if part.get_content_type() == "text/plain":
+                            body = part.get_payload(decode=True).decode()
+                else:
+                    body = msg.get_payload(decode=True).decode()
+
+                # Check for keyword
+                if keyword.lower() in body.lower():
+                    # Find lead in DB
+                    lead = supabase.table("leads").select("*").eq("email", from_email).execute()
+                    if lead.data:
+                        lead_data = lead.data[0]
+                        print(f"Found keyword '{keyword}' from {from_email}. Sending PDF...")
+                        
+                        pdf_bytes = generate_pdf_buffer(lead_data)
+                        success = send_email_with_pdf(
+                            acc, 
+                            from_email, 
+                            "Your Personalized 7-Day Guide", 
+                            "Attached is your personalized guide as requested.", 
+                            pdf_bytes
+                        )
+                        if success:
+                            # Mark as 'responded' in your DB
+                            supabase.table("responded_leads").upsert({"email": from_email, "responded_at": datetime.now(timezone.utc).isoformat()}).execute()
+                            
+        except Exception as e:
+            print(f"Error checking {acc['email']}: {e}")
+
+
+
+import imaplib
+import email
+from email.mime.multipart import MIMEMultipart
+from email.mime.application import MIMEApplication
+import pdfkit
+
+def check_and_reply_with_pdf(keyword="ofc"):
+    # Get all connected SMTP accounts
+    accounts = supabase.table("smtp_accounts").select("*").execute().data
+    
+    for acc in accounts:
+        try:
+            # Connect to IMAP (using same credentials as SMTP)
+            mail = imaplib.IMAP4_SSL(acc["imap_host"])
+            mail.login(acc["smtp_username"], aesgcm_decrypt(acc["encrypted_smtp_password"]))
+            mail.select("inbox")
+            
+            # Search for UNSEEN (unread) messages
+            _, data = mail.search(None, 'UNSEEN')
+            for num in data[0].split():
+                _, msg_data = mail.fetch(num, '(RFC822)')
+                msg = email.message_from_bytes(msg_data[0][1])
+                body = ""
+                
+                # Extract text body
+                if msg.is_multipart():
+                    for part in msg.walk():
+                        if part.get_content_type() == "text/plain":
+                            body = part.get_payload(decode=True).decode()
+                else:
+                    body = msg.get_payload(decode=True).decode()
+
+                # If keyword found, generate and send PDF
+                if keyword.lower() in body.lower():
+                    from_email = email.utils.parseaddr(msg['From'])[1].lower()
+                    lead = supabase.table("leads").select("*").eq("email", from_email).execute()
+                    
+                    if lead.data:
+                        print(f"Match found! Sending PDF to {from_email}")
+                        # [Add the generate_pdf_buffer and send_email_with_pdf logic here]
+                        
+        except Exception as e:
+            print(f"IMAP Error for {acc['email']}: {e}")
+            
+            
+            
+            
 if __name__ == "__main__":
     send_queued()
+    check_for_keyword_replies(keyword="ofc")
