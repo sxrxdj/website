@@ -584,13 +584,20 @@ def check_and_reply_with_pdf(keyword="ofc"):
                     # 6. Stop all future scheduled emails for this lead
                     supabase.table("email_queue").delete().eq("lead_id", lead_id).execute()
                     
+                    # 7. Record in responded_leads table with the required original_lead_id
+                    supabase.table("responded_leads").upsert({
+                        "original_lead_id": lead_id,  # ADD THIS - it's required
+                        "email": from_email, 
+                        "responded_at": datetime.now(timezone.utc).isoformat()
+                    }).execute()
+                    
                     print(f"✅ PDF Sent & Lead {from_email} marked as responded.")
 
             mail.logout()
         except Exception as e:
             print(f"❌ Error: {str(e)}")
-            
-            
+
+
             
             
 if __name__ == "__main__":
