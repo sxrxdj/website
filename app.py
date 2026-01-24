@@ -840,6 +840,76 @@ def api_get_lead_ai_usage(lead_id):
     except Exception as e:
         return jsonify({"error": "internal_server_error", "detail": str(e)}), 500
 
+        
+import pdfkit # Add to imports
+from flask import make_response
+
+# ... existing code ...
+
+@app.route('/api/generate-7day-pdf/<int:lead_id>')
+def generate_personalized_pdf(lead_id):
+    try:
+        # 1. Fetch lead data
+        lead = supabase.table("leads").select("*").eq("id", lead_id).single().execute()
+        if not lead.data:
+            return jsonify({"error": "Lead not found"}), 404
+        
+        lead_data = lead.data
+        full_name = f"{lead_data.get('name', '')} {lead_data.get('last_name', '')}".strip()
+        email = lead_data.get('email')
+
+        # 2. Build the personalized URL
+        params = {
+            "user_id": lead_id,
+            "email": email,
+            "full_name": full_name
+        }
+        encoded_params = urllib.parse.urlencode(params)
+        personalized_url = f"https://replyzeai.com/app/auto-register?{encoded_params}"
+
+        # 3. Read and modify the HTML template
+        with open('7days.html', 'r', encoding='utf-8') as f:
+            html_content = f.read()
+
+        # Replace the static buttons with the personalized URL
+        # Note: We replace the placeholder URLs from your 7days.html file
+        html_content = html_content.replace(
+            'https://replyzeai.app/auto-register', # Use the exact string in your HTML
+            personalized_url
+        )
+        # Also replace the specific temporary link in your provided HTML
+        html_content = html_content.replace(
+            'https://replyzeai.vercel.app/temporary2', 
+            personalized_url
+        )
+
+        # 4. PDF Generation Options (Enables CSS/Images)
+        options = {
+            'page-size': 'A4',
+            'margin-top': '0in',
+            'margin-right': '0in',
+            'margin-bottom': '0in',
+            'margin-left': '0in',
+            'encoding': "UTF-8",
+            'enable-local-file-access': None,
+            'no-outline': None
+        }
+
+        # 5. Generate PDF
+        pdf = pdfkit.from_string(html_content, False, options=options)
+
+        # 6. Return as download
+        response = make_response(pdf)
+        response.headers['Content-Type'] = 'application/json'
+        response.headers['Content-Disposition'] = f'attachment; filename=7daysys_{lead_id}.pdf'
+        
+        return response
+
+    except Exception as e:
+        print(f"PDF Generation Error: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+        
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
