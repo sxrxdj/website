@@ -462,7 +462,7 @@ pdf_config = pdfkit.configuration(wkhtmltopdf=WKHTML_PATH)
 
 # --- In worker.py ---
 
-def check_for_keyword_replies(keyword="ofc"):
+def check_for_keyword_replies(keyword="sure"):
     print(f"DEBUG: Starting reply check for keyword: {keyword}")
     
     # Get the base URL for tracking from env or default
@@ -576,7 +576,7 @@ def check_for_keyword_replies(keyword="ofc"):
 
 
 
-def check_and_reply_with_pdf(keyword="ofc"):
+def check_and_reply_with_pdf(keyword="sure"):
     print(f"DEBUG: Starting reply check for keyword: {keyword}")
     
     # 1. Fetch SMTP accounts
@@ -678,4 +678,4 @@ def check_and_reply_with_pdf(keyword="ofc"):
             
 if __name__ == "__main__":
     send_queued()
-    check_for_keyword_replies(keyword="ofc")
+    check_for_keyword_replies(keyword="sure")
