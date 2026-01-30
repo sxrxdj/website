@@ -666,4 +666,4 @@ def check_and_reply_with_pdf():
             
 if __name__ == "__main__":
     send_queued()
-    check_for_keyword_replies(keyword)
+    check_for_keyword_replies()
