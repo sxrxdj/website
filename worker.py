@@ -563,7 +563,8 @@ def check_for_keyword_replies():
 
 
 
-def check_and_reply_with_pdf(keyword="demo"):
+def check_and_reply_with_pdf():
+    keywords = ["yes", "sure", "demo", "interested", "send", "link", "cost", "price", "how much"]
     print(f"DEBUG: Starting reply check for keyword: {keyword}")
     
     # 1. Fetch SMTP accounts
@@ -665,4 +666,4 @@ def check_and_reply_with_pdf(keyword="demo"):
             
 if __name__ == "__main__":
     send_queued()
-    check_for_keyword_replies(keyword="demo")
+    check_for_keyword_replies(keyword)
