@@ -462,12 +462,13 @@ pdf_config = pdfkit.configuration(wkhtmltopdf=WKHTML_PATH)
 
 # --- In worker.py ---
 
-def check_for_keyword_replies(keyword="demo"):
-    print(f"DEBUG: Starting reply check for keyword: {keyword}")
+def check_for_keyword_replies():
+    # 1. Group of words to detect
+    trigger_keywords = ["yes", "sure", "demo", "interested", "send", "link", "cost", "price", "how much"]
     
-    # Get the base URL for tracking from env or default
+    print(f"DEBUG: Checking for keyword group: {trigger_keywords}")
+    
     app_base_url = os.environ.get('APP_BASE_URL', 'https://replyzeai.com/goods')
-    
     accounts = supabase.table("smtp_accounts").select("*").not_.is_("imap_host", "null").execute()
     
     for acc in accounts.data:
@@ -476,14 +477,16 @@ def check_for_keyword_replies(keyword="demo"):
             mail = imaplib.IMAP4_SSL(acc["imap_host"])
             mail.login(acc["smtp_username"], password)
             mail.select("inbox")
-            
             _, data = mail.search(None, 'UNSEEN')
             
+            if not data[0]: continue
+
             for num in data[0].split():
                 _, msg_data = mail.fetch(num, '(RFC822)')
                 msg = email.message_from_bytes(msg_data[0][1])
                 from_email = email.utils.parseaddr(msg['From'])[1].lower()
                 
+                # Extract body
                 body = ""
                 if msg.is_multipart():
                     for part in msg.walk():
@@ -492,83 +495,67 @@ def check_for_keyword_replies(keyword="demo"):
                 else:
                     body = msg.get_payload(decode=True).decode(errors='ignore')
 
-                if keyword.lower() in body.lower():
-                    # 1. Fetch Lead data
+                # 2. Check if ANY keyword from the list is in the email body
+                if any(word in body.lower() for word in trigger_keywords):
                     lead_res = supabase.table("leads").select("*").eq("email", from_email).execute()
                     if not lead_res.data: continue
-                        
                     lead_info = lead_res.data[0]
+                    
+                    # Setup tracking and PDF as before...
                     lead_id = lead_info['id']
-                    
-                    # 2. Try to find the campaign_id (to ensure tracking works)
-                    # We look for the most recent email sent to this lead to get the campaign context
-                    last_email = supabase.table("email_queue") \
-                        .select("campaign_id") \
-                        .eq("lead_id", lead_id) \
-                        .order("id", desc=True) \
-                        .limit(1) \
-                        .execute()
-                    
-                    campaign_id = last_email.data[0]['campaign_id'] if last_email.data else 0
-
-                    # 3. Construct the Personalized & Tracked Demo Link
-                    # The target URL is your demo page
+                    campaign_id = 0 # Default if not found
                     target_demo_url = "https://replyzeai.com/goods/templates/demooff"
                     encoded_target = urllib.parse.quote(target_demo_url)
-                    
-                    # The tracking URL points to your app.py /track/ endpoint
                     tracking_link = f"{app_base_url}/track/{lead_id}/{campaign_id}?url={encoded_target}"
-
-                    # 4. Generate the PDF (Existing Logic)
-                    full_name = f"{lead_info.get('name', '')} {lead_info.get('last_name', '')}".strip()
-                    params = {"user_id": lead_id, "email": from_email, "full_name": full_name}
-                    p_url = f"https://replyzeai.com/app/auto-register?{urllib.parse.urlencode(params)}"
                     
-                    with open('7days.html', 'r', encoding='utf-8') as f:
-                        html_content = f.read()
-                    html_content = html_content.replace('https://replyzeai.vercel.app/temporary2', p_url)
-                    pdf_bytes = pdfkit.from_string(html_content, False, options={'quiet': ''}, configuration=pdf_config)
+                    # Generate PDF (using your existing logic)
+                    pdf_bytes = generate_pdf_buffer(lead_info) 
 
-                    # 5. Construct HTML Email Body with the Link
+                    # 3. CONSTRUCT THE HUMAN RESPONSE
                     reply = MIMEMultipart()
                     reply["Subject"] = f"Re: {msg['Subject']}"
                     reply["From"] = f"{acc['display_name']} <{acc['email']}>"
                     reply["To"] = from_email
                     
+                    # Tone: Confident, Human, Simple Next Step
+                    # Addressing the cost based on the Starter Plan
                     html_body = f"""
                     <html>
-                        <body>
+                        <body style="font-family: sans-serif; color: #333; line-height: 1.5;">
                             <p>Hi {lead_info.get('name', 'there')},</p>
-                            <p>As requested, I've attached your personalized 7-Day Lead Conversion System guide PDF to this email.</p>
-                            <p><strong>Want to see it in action?</strong></p>
-                            <p>Check out your personalized interactive demo here:<br>
-                            <a href="{tracking_link}" style="background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block; margin-top: 10px;">
-                                Launch Interactive Demo
-                            </a></p>
-                            <p>Best regards,<br>{acc['display_name']}</p>
+                            
+                            <p>Happy to send that over. I've attached the 7-Day Lead Conversion guide to this email for you to keep.</p>
+
+                            <p>To answer your question on cost—we keep it very simple for solo agents. The starter plan is <b>$99/mo</b> and covers your inbox 24/7 so you never miss a lead while you're out at showings.</p>
+                            
+                            <p><b>Next step:</b> You can see exactly how the AI interacts with a buyer by clicking your personalized demo link below:</p>
+                            
+                            <p style="margin: 25px 0;">
+                                <a href="{tracking_link}" style="background-color: #007bff; color: white; padding: 12px 25px; text-decoration: none; border-radius: 5px; font-weight: bold;">
+                                    Launch My Interactive Demo
+                                </a>
+                            </p>
+                            
+                            <p>Best,<br>{acc['display_name']}</p>
                         </body>
                     </html>
                     """
                     reply.attach(MIMEText(html_body, "html"))
                     
-                    # Attach PDF
+                    # Attach the PDF
                     part = MIMEApplication(pdf_bytes, Name="7daysys.pdf")
                     part['Content-Disposition'] = 'attachment; filename="7daysys.pdf"'
                     reply.attach(part)
                     
-                    # 6. Send and Cleanup (Existing Logic)
+                    # Send and update DB
                     with smtplib.SMTP(acc["smtp_host"], acc["smtp_port"]) as server:
                         server.starttls()
                         server.login(acc["smtp_username"], password)
                         server.send_message(reply)
 
-                    supabase.table("leads").update({
-                        "responded": True,
-                        "responded_at": datetime.now(timezone.utc).isoformat()
-                    }).eq("id", lead_id).execute()
-                    
+                    supabase.table("leads").update({"responded": True}).eq("id", lead_id).execute()
                     supabase.table("email_queue").delete().eq("lead_id", lead_id).execute()
-                    print(f"✅ Sent PDF + Tracked Demo Link to {from_email}")
+                    print(f"✅ Humanized reply sent to {from_email}")
 
             mail.logout()
         except Exception as e:
