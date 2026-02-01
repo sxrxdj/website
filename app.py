@@ -529,27 +529,55 @@ def track_click(lead_id, campaign_id):
         email_queue_id = request.args.get('eqid', None)
         
         # Convert IDs to integers if possible
+        lead_id_int = None
+        campaign_id_int = None
+        
         try:
-            lead_id_int = int(lead_id)
-        except (ValueError, TypeError):
+            if lead_id and lead_id.lower() != 'none' and lead_id.lower() != 'null':
+                lead_id_int = int(lead_id)
+        except (ValueError, TypeError) as e:
+            print(f"Warning: Could not convert lead_id '{lead_id}' to int: {e}")
             lead_id_int = None
-            
+        
         try:
-            campaign_id_int = int(campaign_id)
-        except (ValueError, TypeError):
+            if campaign_id and campaign_id.lower() != 'none' and campaign_id.lower() != 'null':
+                campaign_id_int = int(campaign_id)
+        except (ValueError, TypeError) as e:
+            print(f"Warning: Could not convert campaign_id '{campaign_id}' to int: {e}")
             campaign_id_int = None
         
-        # Record the click in the database
-        supabase.table("link_clicks").insert({
-            "lead_id": lead_id_int,
-            "campaign_id": campaign_id_int,
-            "url": original_url,
-            "email_queue_id": email_queue_id
-        }).execute()
+        # Prepare insert data - only include valid integer IDs
+        insert_data = {
+            "url": original_url
+        }
         
-        # Redirect to the demo page with lead_id as parameter
-        demo_url = "https://replyzeai.com/goods/templates/demooff"
+        # Only add lead_id if it's a valid integer
+        if lead_id_int is not None:
+            insert_data["lead_id"] = lead_id_int
+        
+        # Only add campaign_id if it's a valid integer
+        if campaign_id_int is not None:
+            insert_data["campaign_id"] = campaign_id_int
+        
+        # Add email_queue_id if available
+        if email_queue_id:
+            try:
+                insert_data["email_queue_id"] = int(email_queue_id)
+            except (ValueError, TypeError):
+                print(f"Warning: Could not convert email_queue_id '{email_queue_id}' to int")
+                insert_data["email_queue_id"] = None
+        
+        # Record the click in the database
+        result = supabase.table("link_clicks").insert(insert_data).execute()
+        
+        # Get the ID of the click we just created
+        click_id = result.data[0]['id'] if result.data else None
+        
+        # Append click_id to the redirect so the demo page knows which row to update
+        demo_url = "https://replyzeai.com/goods/templates/demo"
         redirect_url = f"{demo_url}?lead_id={lead_id}&campaign_id={campaign_id}"
+        if click_id:
+            redirect_url += f"&click_id={click_id}"
         if email_queue_id:
             redirect_url += f"&eqid={email_queue_id}"
             
@@ -557,7 +585,9 @@ def track_click(lead_id, campaign_id):
         
     except Exception as e:
         print(f"Error tracking click: {str(e)}")
-        return "Error tracking click", 500
+        # Fallback redirect even if tracking fails
+        demo_url = "https://replyzeai.com/goods/templates/demo"
+        return redirect(f"{demo_url}?lead_id={lead_id}&campaign_id={campaign_id}")
 
 @app.route('/api/campaigns/<int:campaign_id>/clicks')
 def api_get_campaign_clicks(campaign_id):
