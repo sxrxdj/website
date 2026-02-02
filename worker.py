@@ -514,7 +514,7 @@ def check_for_keyword_replies():
                         <body style="font-family: sans-serif; color: #333; line-height: 1.6;">
                             <p>Hi {lead_info.get('name', 'there')},</p>
                             
-                            <p>Happy to help with that. To answer your question on cost—we keep it simple for solo agents. Our <b>Starter plan is $99/mo</b> and covers your inbox 24/7 so you never lose a buyer while you're out at a showing.</p>
+                            <p>Happy to help with that. </p>
                             
                             <p><b>Next step:</b> You can see exactly how the AI interacts with your leads by clicking your personalized demo link below (No Zoom call required):</p>
                             
