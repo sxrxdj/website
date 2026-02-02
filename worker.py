@@ -464,7 +464,7 @@ pdf_config = pdfkit.configuration(wkhtmltopdf=WKHTML_PATH)
 
 def check_for_keyword_replies():
     # 1. Group of words to detect
-    trigger_keywords = ["yes", "sure", "demo", "interested", "send", "link", "cost", "price", "how much"]
+    trigger_keywords = ["yes", "sure", "demo", "interested", "send", "link", "cost", "price", "how much", "will work"]
     
     print(f"DEBUG: Checking for keyword group: {trigger_keywords}")
     
