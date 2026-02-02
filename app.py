@@ -388,10 +388,10 @@ def api_import_leads():
                 continue
 
             # Validate email
-            try:
-                validate_email(email)
-            except EmailNotValidError:
-                continue
+           # try:
+             #   validate_email(email)
+            #except EmailNotValidError:
+                #continue
 
             # Extract custom fields
             custom_fields = {
